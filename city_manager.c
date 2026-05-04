@@ -5,6 +5,8 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
+#include <signal.h>
 #include <time.h>
 #include <errno.h>
 
@@ -261,6 +263,27 @@ void do_add(const char *district) {
     char action[128];
     snprintf(action, sizeof(action), "Add report %d", r.id);
     try_log_action(district, action);
+
+    // Notify monitor
+    int monitor_fd = open(".monitor_pid", O_RDONLY);
+    if (monitor_fd >= 0) {
+        char pid_buf[32];
+        memset(pid_buf, 0, sizeof(pid_buf));
+        int bytes = read(monitor_fd, pid_buf, sizeof(pid_buf) - 1);
+        close(monitor_fd);
+        if (bytes > 0) {
+            pid_t pid = atoi(pid_buf);
+            if (kill(pid, SIGUSR1) == 0) {
+                try_log_action(district, "Successfully notified monitor via SIGUSR1");
+            } else {
+                try_log_action(district, "Failed to notify monitor: kill failed");
+            }
+        } else {
+            try_log_action(district, "Failed to notify monitor: empty PID file");
+        }
+    } else {
+        try_log_action(district, "Failed to notify monitor: .monitor_pid not found");
+    }
 }
 
 void do_list(const char *district) {
@@ -468,6 +491,31 @@ void do_filter(const char *district, int num_conditions, char **conditions) {
     try_log_action(district, "Filter reports");
 }
 
+void do_remove_district(const char *district) {
+    if (current_role != ROLE_MANAGER) {
+        fprintf(stderr, "Only manager can remove districts.\n");
+        exit(1);
+    }
+
+    char link_name[256];
+    snprintf(link_name, sizeof(link_name), "active_reports-%s", district);
+    unlink(link_name);
+    
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        exit(1);
+    } else if (pid == 0) {
+        execlp("rm", "rm", "-rf", district, NULL);
+        perror("execlp");
+        exit(1);
+    } else {
+        int status;
+        waitpid(pid, &status, 0);
+        printf("District %s removed.\n", district);
+    }
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 4) {
         fprintf(stderr, "Usage: %s --role <role> --user <user> --<cmd> <district> [args...]\n", argv[0]);
@@ -502,7 +550,9 @@ int main(int argc, char *argv[]) {
     char *cmd = argv[cmd_index] + 2; // skip "--"
     char *district = argv[cmd_index + 1];
 
-    setup_district(district);
+    if (strcmp(cmd, "remove_district") != 0) {
+        setup_district(district);
+    }
 
     if (strcmp(cmd, "add") == 0) {
         do_add(district);
@@ -519,6 +569,8 @@ int main(int argc, char *argv[]) {
         do_update_threshold(district, atoi(argv[cmd_index + 2]));
     } else if (strcmp(cmd, "filter") == 0) {
         do_filter(district, argc - (cmd_index + 2), &argv[cmd_index + 2]);
+    } else if (strcmp(cmd, "remove_district") == 0) {
+        do_remove_district(district);
     } else {
         fprintf(stderr, "Unknown command: %s\n", cmd);
         return 1;

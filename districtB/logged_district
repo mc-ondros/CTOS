@@ -1,0 +1,4 @@
+[1777889467] Role: manager, User: bob, Action: Add report 1
+[1777889467] Role: manager, User: bob, Action: Successfully notified monitor via SIGUSR1
+[1777889467] Role: manager, User: bob, Action: Add report 2
+[1777889467] Role: manager, User: bob, Action: Successfully notified monitor via SIGUSR1
